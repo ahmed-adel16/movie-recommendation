@@ -1,8 +1,8 @@
 import pandas as pd
 import streamlit as st
 
-from evaluation import evaluate_recommender
-from hybrid_recommendation import collab_df, df, hybrid_recommend, movies
+from src.evaluation import evaluate_recommender
+from src.hybrid_recommendation import collab_df, df, hybrid_recommend, movies
 
 
 st.set_page_config(
