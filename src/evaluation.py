@@ -10,7 +10,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import train_test_split
 
 
-DATA_PATH = "data/processed_movies.csv"
+DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed_movies.csv"
 
 
 def load_ratings():

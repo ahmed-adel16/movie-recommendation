@@ -237,55 +237,60 @@ with tab_evaluation:
             step=0.05,
         )
 
-    with st.spinner("Evaluating recommender performance..."):
-        comparison_df, evaluation_settings = get_evaluation_metrics(
-            test_size,
-            eval_top_n,
-            relevance_threshold,
-            eval_alpha,
+    if st.button("Run evaluation", type="primary"):
+        with st.spinner("Evaluating recommender performance..."):
+            st.session_state["evaluation_results"] = get_evaluation_metrics(
+                test_size,
+                eval_top_n,
+                relevance_threshold,
+                eval_alpha,
+            )
+
+    if "evaluation_results" not in st.session_state:
+        st.info("Run the evaluation to compare all models on the train/test split.")
+    else:
+        comparison_df, evaluation_settings = st.session_state["evaluation_results"]
+        best_model = comparison_df.sort_values("F1-Score", ascending=False).iloc[0]
+        summary_rmse, summary_mae, summary_f1 = st.columns(3)
+
+        summary_rmse.metric(
+            "Best RMSE",
+            f"{comparison_df['RMSE'].min():.3f}",
+        )
+        summary_mae.metric(
+            "Best MAE",
+            f"{comparison_df['MAE'].min():.3f}",
+        )
+        summary_f1.metric(
+            "Best F1 Model",
+            best_model["Model"],
+            f"{best_model['F1-Score']:.3f}",
         )
 
-    best_model = comparison_df.sort_values("F1-Score", ascending=False).iloc[0]
-    summary_rmse, summary_mae, summary_f1 = st.columns(3)
+        st.dataframe(
+            comparison_df.round(
+                {
+                    "RMSE": 3,
+                    "MAE": 3,
+                    "Precision": 3,
+                    "Recall": 3,
+                    "F1-Score": 3,
+                }
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
 
-    summary_rmse.metric(
-        "Best RMSE",
-        f"{comparison_df['RMSE'].min():.3f}",
-    )
-    summary_mae.metric(
-        "Best MAE",
-        f"{comparison_df['MAE'].min():.3f}",
-    )
-    summary_f1.metric(
-        "Best F1 Model",
-        best_model["Model"],
-        f"{best_model['F1-Score']:.3f}",
-    )
-
-    st.dataframe(
-        comparison_df.round(
-            {
-                "RMSE": 3,
-                "MAE": 3,
-                "Precision": 3,
-                "Recall": 3,
-                "F1-Score": 3,
-            }
-        ),
-        hide_index=True,
-        use_container_width=True,
-    )
-
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {"Setting": setting, "Value": value}
-                for setting, value in evaluation_settings.items()
-            ]
-        ),
-        hide_index=True,
-        use_container_width=True,
-    )
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"Setting": setting, "Value": value}
+                    for setting, value in evaluation_settings.items()
+                ]
+            ),
+            hide_index=True,
+            use_container_width=True,
+        )
 
 with tab_data:
     st.subheader("Dataset Overview")
