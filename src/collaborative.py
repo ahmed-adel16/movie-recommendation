@@ -1,13 +1,12 @@
 import pandas as pd
-import numpy as np
 from pathlib import Path
-from sklearn.decomposition import TruncatedSVD
-from math import sqrt
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 # =========================
-# Load data
+# Load processed dataset
 # =========================
 
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed_movies.csv"
@@ -16,105 +15,74 @@ df = pd.read_csv(DATA_PATH)
 
 
 # =========================
-# User-Item Matrix
+# Remove duplicate movies
 # =========================
 
-user_movie_matrix = df.pivot_table(
-    index='userId',
-    columns='movieId',
-    values='rating'
-)
+movies = df[['movieId', 'title', 'combined_features']].drop_duplicates()
+movies = movies.reset_index(drop=True) # reset index to start from 0 after dropping duplicates
 
 
 # =========================
-# Mean center (IMPORTANT FIX)
+# TF-IDF Vectorization
 # =========================
 
-user_mean = user_movie_matrix.mean(axis=1)
+tfidf = TfidfVectorizer(stop_words='english')
 
-matrix_centered = user_movie_matrix.sub(user_mean, axis=0)
-matrix_centered = matrix_centered.fillna(0)
+tfidf_matrix = tfidf.fit_transform(
+    movies['combined_features']
+    )
 
 
-# =========================
-# Convert to numpy
-# =========================
-
-X = matrix_centered.values
 
 
 # =========================
-# SIMPLE SVD (NO TUNING)
+# Create title index mapping
 # =========================
 
-n_components = min(50, max(1, min(X.shape) - 1))
-svd = TruncatedSVD(n_components=n_components, random_state=42)
-X_reduced = svd.fit_transform(X)
-
-
-# =========================
-# Reconstruct
-# =========================
-
-X_reconstructed = np.dot(X_reduced, svd.components_)
+indices = pd.Series(
+    movies.index, 
+    index=movies['movieId']
+    )
 
 
 # =========================
-# Add back user mean
+# Recommendation Function
 # =========================
 
-predicted = X_reconstructed + user_mean.values.reshape(-1, 1)
+def content_recommendations(movie_id, top_n=10):
 
+    if movie_id not in indices.index:
+        raise ValueError("Unknown movieId")
 
-# =========================
-# DataFrame
-# =========================
+    idx = indices[movie_id]
 
-pred_df = pd.DataFrame(
-    predicted,
-    index=user_movie_matrix.index,
-    columns=user_movie_matrix.columns
-)
+    # compute similarity only for this movie
+    sim_scores = cosine_similarity(
+        tfidf_matrix[idx],
+        tfidf_matrix
+    )[0]
 
+    # pair index with similarity
+    sim_scores = list(enumerate(sim_scores))
 
-def evaluate_model():
-    mask = ~np.isnan(user_movie_matrix.values)
+    # sort by similarity
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
 
-    actual = user_movie_matrix.values[mask]
-    pred = predicted[mask]
+    # remove itself
+    sim_scores = sim_scores[1:top_n + 1]
 
-    rmse = sqrt(mean_squared_error(actual, pred))
-    mae = mean_absolute_error(actual, pred)
+    movie_indices = [i[0] for i in sim_scores]
 
-    return rmse, mae
-
-
-def predict_rating(user_id, movie_id):
-    if user_id not in pred_df.index:
-        raise ValueError(f"Unknown user ID: {user_id}")
-
-    if movie_id not in pred_df.columns:
-        raise ValueError(f"Unknown movie ID: {movie_id}")
-
-    return pred_df.loc[user_id, movie_id]
+    return movies.iloc[movie_indices][['movieId', 'title']]
 
 
 if __name__ == "__main__":
-    rmse, mae = evaluate_model()
 
-    print("\nRMSE:", rmse)
-    print("MAE:", mae)
+    sample_movie = movies.iloc[0]['movieId']
+    print(f"Sample movie: {movies.iloc[0]['title']}")
 
-    user_id = 4
-    movie_id = 1391
+    recommendations = content_recommendations(sample_movie, 5) # recommendation of top 5 movies 
 
-    print("\nPrediction Example")
-    print("------------------")
-    print("User:", user_id)
-    print("Movie:", movie_id)
+    print("\nRecommended Movies:\n")
 
-    print("Predicted Rating:", predict_rating(user_id, movie_id))
-    print("Actual Rating:", df[
-        (df.userId == user_id) &
-        (df.movieId == movie_id)
-    ]['rating'].values[0])
+    print(recommendations)

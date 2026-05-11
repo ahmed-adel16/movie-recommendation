@@ -7,7 +7,7 @@ import pandas as pd
 
 movies = pd.read_csv("data/movies.csv")
 ratings = pd.read_csv("data/ratings.csv")
-
+tags=  pd.read_csv('data/tags.csv')
 
 # =========================
 # Missing values
@@ -19,6 +19,8 @@ print(movies.isnull().sum())
 print("\nRatings Missing Values:")
 print(ratings.isnull().sum())
 
+print("\nTags Missing Values:")
+print(tags.isnull().sum())
 
 # =========================
 # Remove duplicates
@@ -26,6 +28,16 @@ print(ratings.isnull().sum())
 
 movies.drop_duplicates(inplace=True)
 ratings.drop_duplicates(inplace=True)
+tags.drop_duplicates(inplace=True)
+
+
+# ========================
+# Aggregate tags per movie
+# ========================
+
+movie_tags = tags.groupby("movieId")["tag"].apply(
+    lambda x: " ".join(x.astype(str))
+).reset_index()
 
 
 # =========================
@@ -49,6 +61,11 @@ df = pd.merge(
     on='movieId'
 )
 
+df = pd.merge(
+    df,
+    movie_tags,
+    on='movieId'
+)
 
 # =========================
 # Display samples
@@ -56,6 +73,11 @@ df = pd.merge(
 
 print("\nMerged Dataset:")
 print(df.head())
+
+df["combined_features"] = (
+    df["genres"] + " " +
+    df["tag"]
+)
 
 # =========================
 # Check rating range (to check outliers)
@@ -72,3 +94,5 @@ df.to_csv(
 )
 
 print("\nProcessed dataset saved successfully.")
+
+print("\nProcessed dataset columns:-\n", df.columns.tolist())

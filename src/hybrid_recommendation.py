@@ -34,10 +34,13 @@ tfidf_matrix = tfidf.fit_transform(movies['genres'])
 content_sim = cosine_similarity(tfidf_matrix)
 
 
-indices = pd.Series(
+# 🔥 FIX: use movieId mapping (NOT title)
+movieid_to_idx = pd.Series(
     movies.index,
-    index=movies['title']
-).drop_duplicates()
+    index=movies['movieId']
+)
+
+idx_to_movieid = movies['movieId']
 
 
 # =========================
@@ -57,7 +60,11 @@ matrix_centered = user_movie_matrix.sub(user_mean, axis=0).fillna(0)
 X = matrix_centered.values
 
 n_components = min(50, max(1, min(X.shape) - 1))
-svd = TruncatedSVD(n_components=n_components, random_state=42)
+
+svd = TruncatedSVD(
+    n_components=n_components,
+    random_state=42
+)
 
 X_reduced = svd.fit_transform(X)
 
@@ -73,22 +80,26 @@ collab_df = pd.DataFrame(
 
 
 # =========================
-# HYBRID FUNCTION
+# HYBRID FUNCTION (UPDATED)
 # =========================
 
-def hybrid_recommend(user_id, title, alpha=0.5, top_n=10):
+def hybrid_recommend(user_id, movie_id, alpha=0.5, top_n=10):
+
     if user_id not in collab_df.index:
         raise ValueError(f"Unknown user ID: {user_id}")
 
-    if title not in indices.index:
-        raise ValueError(f"Unknown movie title: {title}")
+    if movie_id not in movieid_to_idx.index:
+        raise ValueError(f"Unknown movie ID: {movie_id}")
 
-    idx = indices[title]
+    idx = movieid_to_idx[movie_id]
 
-    # content similarity
     sim_scores = list(enumerate(content_sim[idx]))
 
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+    sim_scores = sorted(
+        sim_scores,
+        key=lambda x: x[1],
+        reverse=True
+    )
 
     sim_scores = sim_scores[1:top_n + 1]
 
@@ -96,15 +107,13 @@ def hybrid_recommend(user_id, title, alpha=0.5, top_n=10):
 
     for i, content_score in sim_scores:
 
-        movie_id = movies.iloc[i]['movieId']
+        target_movie_id = movies.iloc[i]['movieId']
 
-        # collaborative score
-        if movie_id not in collab_df.columns:
+        if target_movie_id not in collab_df.columns:
             continue
 
-        collab_score = collab_df.loc[user_id, movie_id]
+        collab_score = collab_df.loc[user_id, target_movie_id]
 
-        # normalization (important)
         collab_norm = collab_score / 5.0
 
         final_score = (
@@ -112,26 +121,36 @@ def hybrid_recommend(user_id, title, alpha=0.5, top_n=10):
             (1 - alpha) * collab_norm
         )
 
-        results.append((
-            movies.iloc[i]['title'],
-            movies.iloc[i]['genres'],
-            float(content_score),
-            float(collab_score),
-            float(final_score),
-        ))
+        results.append(
+            (
+                target_movie_id,          # 🔥 NEW
+                movies.iloc[i]['title'],
+                movies.iloc[i]['genres'],
+                float(content_score),
+                float(collab_score),
+                float(final_score),
+            )
+        )
 
-    results.sort(key=lambda x: x[4], reverse=True)
+    results.sort(key=lambda x: x[5], reverse=True)
 
     return results
 
 
-if __name__ == "__main__":
-    user_id = 4
-    movie_title = "Adventures of Robin Hood, The (1938)"
+# =========================
+# TEST
+# =========================
 
-    recs = hybrid_recommend(user_id, movie_title)
+if __name__ == "__main__":
+
+    user_id = 4
+
+    movie_id = 1  # Toy Story
+
+    recs = hybrid_recommend(user_id, movie_id)
 
     print("\nHybrid Recommendations:\n")
 
-    for movie, genres, content_score, collab_score, final_score in recs:
-        print(movie, genres, content_score, collab_score, final_score)
+    for r in recs:
+
+        print(r)

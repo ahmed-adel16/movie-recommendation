@@ -2,14 +2,59 @@ import pandas as pd
 import streamlit as st
 
 from src.evaluation import evaluate_recommender
-from src.hybrid_recommendation import collab_df, df, hybrid_recommend, movies
+from src.hybrid_recommendation import (
+    collab_df,
+    df,
+    hybrid_recommend,
+    movies,
+)
+
+from src.tmdb_api import fetch_movie_details
 
 
 st.set_page_config(
     page_title="Movie Recommendation System",
-    page_icon="movie_camera",
+    page_icon="🎬",
     layout="wide",
 )
+
+# -------------------------
+# CUSTOM CSS
+# -------------------------
+
+st.markdown(
+    """
+    <style>
+
+    .movie-card {
+        background-color: #111111;
+        padding: 12px;
+        border-radius: 15px;
+        margin-bottom: 20px;
+        text-align: center;
+        border: 1px solid #333333;
+    }
+
+    .movie-title {
+        font-size: 18px;
+        font-weight: bold;
+        margin-top: 10px;
+        color: white;
+    }
+
+    .movie-text {
+        font-size: 14px;
+        color: #cccccc;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# -------------------------
+# CACHE FUNCTIONS
+# -------------------------
 
 
 @st.cache_data
@@ -24,6 +69,7 @@ def get_user_options():
 
 @st.cache_data
 def get_genre_options():
+
     all_genres = set()
 
     for genres in movies["genres"].dropna():
@@ -38,22 +84,37 @@ def get_genre_options():
 
 @st.cache_data
 def popular_by_genre(selected_genres, min_ratings, top_n):
+
     movie_stats = (
-        df.groupby(["movieId", "title", "genres"], as_index=False)
-        .agg(avg_rating=("rating", "mean"), rating_count=("rating", "count"))
+        df.groupby(
+            ["movieId", "title", "genres"],
+            as_index=False
+        )
+        .agg(
+            avg_rating=("rating", "mean"),
+            rating_count=("rating", "count")
+        )
     )
 
     if selected_genres:
         selected = set(selected_genres)
+
         movie_stats = movie_stats[
             movie_stats["genres"].apply(
-                lambda genres: selected.issubset(set(str(genres).split()))
+                lambda genres:
+                selected.issubset(
+                    set(str(genres).split())
+                )
             )
         ]
 
-    movie_stats = movie_stats[movie_stats["rating_count"] >= min_ratings].copy()
+    movie_stats = movie_stats[
+        movie_stats["rating_count"] >= min_ratings
+    ].copy()
+
     movie_stats["score"] = (
-        movie_stats["avg_rating"] * movie_stats["rating_count"].pow(0.25)
+        movie_stats["avg_rating"]
+        * movie_stats["rating_count"].pow(0.25)
     )
 
     return movie_stats.sort_values(
@@ -63,7 +124,13 @@ def popular_by_genre(selected_genres, min_ratings, top_n):
 
 
 @st.cache_data
-def get_evaluation_metrics(test_size, eval_top_n, relevance_threshold, hybrid_alpha):
+def get_evaluation_metrics(
+    test_size,
+    eval_top_n,
+    relevance_threshold,
+    hybrid_alpha,
+):
+
     return evaluate_recommender(
         test_size=test_size,
         top_n=eval_top_n,
@@ -72,113 +139,240 @@ def get_evaluation_metrics(test_size, eval_top_n, relevance_threshold, hybrid_al
     )
 
 
-def render_recommendations(recommendations, selected_genres):
-    rows = []
+# -------------------------
+# MOVIE CARD RENDER
+# -------------------------
+
+
+def render_movie_cards(recommendations, selected_genres):
+
     selected = set(selected_genres)
 
-    for rank, (title, genres, content_score, collab_score, final_score) in enumerate(
-        recommendations,
-        start=1,
-    ):
+    filtered = []
+
+    for rank, (
+        movie_id,
+        title,
+        genres,
+        content_score,
+        collab_score,
+        final_score,
+    ) in enumerate(recommendations, start=1):
+
         if selected and not selected.issubset(set(str(genres).split())):
             continue
 
-        rows.append(
+        filtered.append(
             {
-                "Rank": rank,
-                "Movie": title,
-                "Genres": genres,
-                "Content Match": round(content_score, 3),
-                "Predicted Rating": round(collab_score, 2),
-                "Hybrid Score": round(final_score, 3),
+                "movie_id": movie_id,   # 🔥 IMPORTANT FIX
+                "title": title,
+                "genres": genres,
+                "content_score": content_score,
+                "collab_score": collab_score,
+                "final_score": final_score,
             }
         )
 
-    return pd.DataFrame(rows)
+    if not filtered:
+        st.info("No hybrid results matched filters.")
+        return
 
+    cols = st.columns(4)
 
-st.title("Movie Recommendation System")
-st.caption("Choose your preferences and get recommendations from the hybrid model.")
+    for idx, movie in enumerate(filtered):
+
+        # 🔥 FIX: USE MOVIE ID NOT TITLE
+        tmdb = fetch_movie_details(movie["movie_id"])
+
+        poster = None
+        overview = ""
+
+        if tmdb:
+            poster = tmdb.get("poster")
+            overview = tmdb.get("overview", "")
+
+        with cols[idx % 4]:
+
+            with st.container(border=True):
+
+                # 🔥 FIX: force fallback image if None or empty
+                if poster and isinstance(poster, str) and len(poster) > 10:
+                    st.image(poster, use_container_width=True)
+                else:
+                    st.image(
+                        "https://via.placeholder.com/500x750?text=No+Poster",
+                        use_container_width=True,
+                    )
+
+                st.markdown(
+                    f"<div class='movie-title'>{movie['title']}</div>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    f"<div class='movie-text'>🎭 {movie['genres']}</div>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    f"<div class='movie-text'>⭐ Hybrid: {movie['final_score']:.3f}</div>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    f"<div class='movie-text'>🧠 Content: {movie['content_score']:.3f}</div>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    f"<div class='movie-text'>👥 Collaborative: {movie['collab_score']:.2f}</div>",
+                    unsafe_allow_html=True,
+                )
+
+                if overview:
+                    st.caption(overview[:120] + "...")
+
+# -------------------------
+# TITLE
+# -------------------------
+
+st.title("🎬 Movie Recommendation System")
+
+st.caption(
+    "Hybrid recommendation system using collaborative + content-based filtering"
+)
+
+# -------------------------
+# SIDEBAR
+# -------------------------
 
 movie_options = get_movie_options()
 user_options = get_user_options()
 genre_options = get_genre_options()
 
 with st.sidebar:
-    st.header("Your Preferences")
+
+    st.header("Preferences")
 
     user_id = st.selectbox(
         "User ID",
         user_options,
-        index=user_options.index(4) if 4 in user_options else 0,
+        index=user_options.index(4)
+        if 4 in user_options
+        else 0,
     )
 
     favorite_movie = st.selectbox(
-        "Favorite movie",
+        "Favorite Movie",
         movie_options,
-        index=movie_options.index("Toy Story (1995)")
+        index=movie_options.index(
+            "Toy Story (1995)"
+        )
         if "Toy Story (1995)" in movie_options
         else 0,
     )
 
     selected_genres = st.multiselect(
-        "Preferred genres",
+        "Preferred Genres",
         genre_options,
         default=[],
     )
 
     alpha = st.slider(
-        "Content-based weight",
+        "Content-Based Weight",
         min_value=0.0,
         max_value=1.0,
         value=0.55,
         step=0.05,
-        help="Higher values favor movies similar to the favorite movie. Lower values favor the selected user's predicted ratings.",
     )
 
-    top_n = st.slider("Number of recommendations", 5, 20, 10)
-    min_ratings = st.slider("Minimum ratings for genre picks", 1, 100, 20)
+    top_n = st.slider(
+        "Number of Recommendations",
+        5,
+        20,
+        10,
+    )
+
+    min_ratings = st.slider(
+        "Minimum Ratings",
+        1,
+        100,
+        20,
+    )
+
+# -------------------------
+# TABS
+# -------------------------
 
 tab_hybrid, tab_genres, tab_evaluation, tab_data = st.tabs(
-    ["Hybrid Recommendations", "Genre Picks", "Evaluation", "Dataset"]
+    [
+        "Hybrid Recommendations",
+        "Genre Picks",
+        "Evaluation",
+        "Dataset",
+    ]
 )
 
+# -------------------------
+# HYBRID TAB
+# -------------------------
+
 with tab_hybrid:
-    st.subheader("Hybrid Recommendations")
+
+    st.subheader("Recommended Movies")
 
     try:
+
+        movie_id = movies[movies["title"] == favorite_movie]["movieId"].values[0]
+
         recommendations = hybrid_recommend(
             user_id=user_id,
-            title=favorite_movie,
+            movie_id=movie_id,
             alpha=alpha,
             top_n=max(top_n * 3, 20),
         )
-        rec_df = render_recommendations(recommendations, selected_genres).head(top_n)
 
-        if rec_df.empty:
-            st.info(
-                "No hybrid results matched every selected genre. Try fewer genre filters."
-            )
-        else:
-            st.dataframe(
-                rec_df,
-                hide_index=True,
-                use_container_width=True,
-            )
+        render_movie_cards(
+            recommendations[:top_n],
+            selected_genres,
+        )
+
     except ValueError as exc:
         st.error(str(exc))
 
-with tab_genres:
-    st.subheader("Popular Movies Matching Your Genres")
+# -------------------------
+# GENRE TAB
+# -------------------------
 
-    genre_df = popular_by_genre(selected_genres, min_ratings, top_n)
+with tab_genres:
+
+    st.subheader(
+        "Popular Movies Matching Genres"
+    )
+
+    genre_df = popular_by_genre(
+        selected_genres,
+        min_ratings,
+        top_n,
+    )
 
     if genre_df.empty:
-        st.info("No movies matched these genre and rating-count filters.")
+
+        st.info(
+            "No movies matched these filters."
+        )
+
     else:
+
         st.dataframe(
             genre_df[
-                ["title", "genres", "avg_rating", "rating_count", "score"]
+                [
+                    "title",
+                    "genres",
+                    "avg_rating",
+                    "rating_count",
+                    "score",
+                ]
             ].rename(
                 columns={
                     "title": "Movie",
@@ -197,109 +391,109 @@ with tab_genres:
             use_container_width=True,
         )
 
+# -------------------------
+# EVALUATION TAB
+# -------------------------
+
 with tab_evaluation:
+
     st.subheader("Evaluation Metrics")
 
     col_test_size, col_top_n, col_threshold, col_alpha = st.columns(4)
 
     with col_test_size:
+
         test_size = st.slider(
             "Test split",
-            min_value=0.1,
-            max_value=0.4,
-            value=0.2,
-            step=0.05,
+            0.1,
+            0.4,
+            0.2,
+            0.05,
         )
 
     with col_top_n:
+
         eval_top_n = st.slider(
-            "Top-N recommendations",
-            min_value=5,
-            max_value=20,
-            value=10,
+            "Top-N",
+            5,
+            20,
+            10,
         )
 
     with col_threshold:
+
         relevance_threshold = st.slider(
-            "Relevant rating threshold",
-            min_value=3.0,
-            max_value=5.0,
-            value=4.0,
-            step=0.5,
+            "Threshold",
+            3.0,
+            5.0,
+            4.0,
+            0.5,
         )
 
     with col_alpha:
+
         eval_alpha = st.slider(
-            "Hybrid content weight",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.5,
-            step=0.05,
+            "Hybrid Weight",
+            0.0,
+            1.0,
+            0.5,
+            0.05,
         )
 
-    if st.button("Run evaluation", type="primary"):
-        with st.spinner("Evaluating recommender performance..."):
-            st.session_state["evaluation_results"] = get_evaluation_metrics(
+    if st.button(
+        "Run Evaluation",
+        type="primary",
+    ):
+
+        with st.spinner(
+            "Evaluating..."
+        ):
+
+            st.session_state[
+                "evaluation_results"
+            ] = get_evaluation_metrics(
                 test_size,
                 eval_top_n,
                 relevance_threshold,
                 eval_alpha,
             )
 
-    if "evaluation_results" not in st.session_state:
-        st.info("Run the evaluation to compare all models on the train/test split.")
-    else:
-        comparison_df, evaluation_settings = st.session_state["evaluation_results"]
-        best_model = comparison_df.sort_values("F1-Score", ascending=False).iloc[0]
-        summary_rmse, summary_mae, summary_f1 = st.columns(3)
+    if "evaluation_results" in st.session_state:
 
-        summary_rmse.metric(
-            "Best RMSE",
-            f"{comparison_df['RMSE'].min():.3f}",
-        )
-        summary_mae.metric(
-            "Best MAE",
-            f"{comparison_df['MAE'].min():.3f}",
-        )
-        summary_f1.metric(
-            "Best F1 Model",
-            best_model["Model"],
-            f"{best_model['F1-Score']:.3f}",
+        comparison_df, evaluation_settings = (
+            st.session_state["evaluation_results"]
         )
 
         st.dataframe(
-            comparison_df.round(
-                {
-                    "RMSE": 3,
-                    "MAE": 3,
-                    "Precision": 3,
-                    "Recall": 3,
-                    "F1-Score": 3,
-                }
-            ),
+            comparison_df.round(3),
             hide_index=True,
             use_container_width=True,
         )
 
-        st.dataframe(
-            pd.DataFrame(
-                [
-                    {"Setting": setting, "Value": value}
-                    for setting, value in evaluation_settings.items()
-                ]
-            ),
-            hide_index=True,
-            use_container_width=True,
-        )
+# -------------------------
+# DATASET TAB
+# -------------------------
 
 with tab_data:
+
     st.subheader("Dataset Overview")
 
     col_movies, col_users, col_ratings = st.columns(3)
 
-    col_movies.metric("Movies", f"{movies['movieId'].nunique():,}")
-    col_users.metric("Users", f"{df['userId'].nunique():,}")
-    col_ratings.metric("Ratings", f"{len(df):,}")
+    col_movies.metric(
+        "Movies",
+        f"{movies['movieId'].nunique():,}",
+    )
+
+    col_users.metric(
+        "Users",
+        f"{df['userId'].nunique():,}",
+    )
+
+    col_ratings.metric(
+        "Ratings",
+        f"{len(df):,}",
+    )
 
     st.dataframe(
         movies.sort_values("title").head(100),

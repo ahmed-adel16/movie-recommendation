@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from pathlib import Path
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -6,96 +7,94 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 
 # =========================
-# Load processed dataset
+# Load data
 # =========================
 
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed_movies.csv"
-
 df = pd.read_csv(DATA_PATH)
 
 
 # =========================
-# Remove duplicate movies
+# Movies table
 # =========================
 
-movies = df[['movieId', 'title', 'genres']].drop_duplicates().reset_index(drop=True)
+movies = df[['movieId', 'title', 'combined_features']].drop_duplicates().reset_index(drop=True)
 
 
 # =========================
-# TF-IDF Vectorization
+# TF-IDF + similarity matrix
 # =========================
 
 tfidf = TfidfVectorizer(stop_words='english')
+tfidf_matrix = tfidf.fit_transform(movies['combined_features'])
 
-tfidf_matrix = tfidf.fit_transform(
-    movies['genres']
-)
-
-
-# =========================
-# Cosine Similarity
-# =========================
-
-cosine_sim = cosine_similarity(
-    tfidf_matrix,
-    tfidf_matrix
-)
+similarity_matrix = cosine_similarity(tfidf_matrix)
 
 
 # =========================
-# Create title index mapping
+# Mapping
 # =========================
 
-indices = pd.Series(
-    movies.index,
-    index=movies['title']
-).drop_duplicates()
+movie_index = pd.Series(movies.index, index=movies["movieId"])
 
 
 # =========================
-# Recommendation Function
+# USER-AWARE CONTENT SCORING
 # =========================
 
-def content_recommendations(title, top_n=10):
-    if title not in indices.index:
-        raise ValueError(f"Unknown movie title: {title}")
+def get_content_scores(user_id, ratings_df=None):
+    """
+    Returns: dict(movieId → score)
+    """
 
-    # get movie index
-    idx = indices[title]
+    if ratings_df is None:
+        ratings_df = df
 
-    # similarity scores
-    sim_scores = list(
-        enumerate(cosine_sim[idx])
-    )
+    user_data = ratings_df[ratings_df.userId == user_id]
 
-    # sort descending
-    sim_scores = sorted(
-        sim_scores,
-        key=lambda x: x[1],
-        reverse=True
-    )
+    if user_data.empty:
+        return {}
 
-    # remove same movie
-    sim_scores = sim_scores[1:top_n + 1]
+    # take positively rated movies only
+    liked = user_data[user_data.rating >= 4.0]
 
-    # get movie indices
-    movie_indices = [
-        i[0]
-        for i in sim_scores
+    if liked.empty:
+        liked = user_data
+
+    liked_indices = [
+        movie_index[mid]
+        for mid in liked.movieId
+        if mid in movie_index
     ]
 
-    # return titles
-    return movies['title'].iloc[
-        movie_indices
-    ]
+    if not liked_indices:
+        return {}
 
+    # aggregate similarity
+    sim_scores = similarity_matrix[:, liked_indices].mean(axis=1)
+
+    return {
+        movies.iloc[i].movieId: float(score)
+        for i, score in enumerate(sim_scores)
+    }
+
+
+# =========================
+# Debug
+# =========================
 
 if __name__ == "__main__":
-    recommendations = content_recommendations(
-        "Toy Story (1995)"
-    )
 
-    print("\nRecommended Movies:\n")
+    sample_user = df.userId.iloc[0]
 
-    for movie in recommendations:
-        print(movie)
+    print(f"Sample User ID: {sample_user}")
+
+    scores = get_content_scores(sample_user)
+
+    print("\nTop Content Scores Sample:\n")
+
+    top = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    for movie_id, score in top:
+        title = movies[movies.movieId == movie_id].title.values[0]
+        print(movie_id, title, score)
