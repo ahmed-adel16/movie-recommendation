@@ -83,7 +83,7 @@ def get_genre_options():
 
 
 @st.cache_data
-def popular_by_genre(selected_genres, min_ratings, top_n):
+def popular_by_genre(selected_genres, top_n):
 
     movie_stats = (
         df.groupby(
@@ -150,6 +150,9 @@ def render_movie_cards(recommendations, selected_genres):
 
     filtered = []
 
+    # -------------------------
+    # KEEP RANK PROPERLY
+    # -------------------------
     for rank, (
         movie_id,
         title,
@@ -164,7 +167,8 @@ def render_movie_cards(recommendations, selected_genres):
 
         filtered.append(
             {
-                "movie_id": movie_id,   # 🔥 IMPORTANT FIX
+                "rank": rank,   # ✅ FIX: store ranking
+                "movie_id": movie_id,
                 "title": title,
                 "genres": genres,
                 "content_score": content_score,
@@ -181,7 +185,6 @@ def render_movie_cards(recommendations, selected_genres):
 
     for idx, movie in enumerate(filtered):
 
-        # 🔥 FIX: USE MOVIE ID NOT TITLE
         tmdb = fetch_movie_details(movie["movie_id"])
 
         poster = None
@@ -195,7 +198,27 @@ def render_movie_cards(recommendations, selected_genres):
 
             with st.container(border=True):
 
-                # 🔥 FIX: force fallback image if None or empty
+                # -------------------------
+                # RANK BADGE (NEW)
+                # -------------------------
+                st.markdown(
+                    f"""
+                    <div style="
+                        background:#222;
+                        color:#fff;
+                        padding:5px 10px;
+                        border-radius:8px;
+                        display:inline-block;
+                        font-size:13px;
+                        margin-bottom:8px;
+                    ">
+                    #{movie['rank']}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                # poster
                 if poster and isinstance(poster, str) and len(poster) > 10:
                     st.image(poster, use_container_width=True)
                 else:
@@ -262,16 +285,19 @@ with st.sidebar:
         else 0,
     )
 
-    favorite_movie = st.selectbox(
-        "Favorite Movie",
-        movie_options,
-        index=movie_options.index(
-            "Toy Story (1995)"
-        )
-        if "Toy Story (1995)" in movie_options
-        else 0,
-    )
+    # -- Old Logic to select favorite movie -- 
+    # favorite_movie = st.selectbox( "Favorite Movie", movie_options, index=movie_options.index("Toy Story (1995)") if "Toy Story (1995)" in movie_options else 0, )
 
+    use_favorite_movie = st.checkbox("Use Favorite Movie (optional)", value=False)
+
+    favorite_movie = None
+
+    if use_favorite_movie:
+        favorite_movie = st.selectbox(
+            "Favorite Movie",
+            movie_options,
+            index=0,
+        )
     selected_genres = st.multiselect(
         "Preferred Genres",
         genre_options,
@@ -293,23 +319,15 @@ with st.sidebar:
         10,
     )
 
-    min_ratings = st.slider(
-        "Minimum Ratings",
-        1,
-        100,
-        20,
-    )
 
 # -------------------------
 # TABS
 # -------------------------
 
-tab_hybrid, tab_genres, tab_evaluation, tab_data = st.tabs(
+tab_hybrid, tab_evaluation = st.tabs(
     [
         "Hybrid Recommendations",
-        "Genre Picks",
         "Evaluation",
-        "Dataset",
     ]
 )
 
@@ -322,15 +340,17 @@ with tab_hybrid:
     st.subheader("Recommended Movies")
 
     try:
-
-        movie_id = movies[movies["title"] == favorite_movie]["movieId"].values[0]
+        movie_id = None
+        if use_favorite_movie and favorite_movie:
+            movie_id = movies[movies["title"] == favorite_movie]["movieId"].values[0]
 
         recommendations = hybrid_recommend(
             user_id=user_id,
-            movie_id=movie_id,
+            movie_id=movie_id if movie_id else None,
             alpha=alpha,
             top_n=max(top_n * 3, 20),
         )
+
 
         render_movie_cards(
             recommendations[:top_n],
@@ -344,52 +364,6 @@ with tab_hybrid:
 # GENRE TAB
 # -------------------------
 
-with tab_genres:
-
-    st.subheader(
-        "Popular Movies Matching Genres"
-    )
-
-    genre_df = popular_by_genre(
-        selected_genres,
-        min_ratings,
-        top_n,
-    )
-
-    if genre_df.empty:
-
-        st.info(
-            "No movies matched these filters."
-        )
-
-    else:
-
-        st.dataframe(
-            genre_df[
-                [
-                    "title",
-                    "genres",
-                    "avg_rating",
-                    "rating_count",
-                    "score",
-                ]
-            ].rename(
-                columns={
-                    "title": "Movie",
-                    "genres": "Genres",
-                    "avg_rating": "Average Rating",
-                    "rating_count": "Rating Count",
-                    "score": "Popularity Score",
-                }
-            ).round(
-                {
-                    "Average Rating": 2,
-                    "Popularity Score": 2,
-                }
-            ),
-            hide_index=True,
-            use_container_width=True,
-        )
 
 # -------------------------
 # EVALUATION TAB
@@ -469,34 +443,3 @@ with tab_evaluation:
             hide_index=True,
             use_container_width=True,
         )
-
-# -------------------------
-# DATASET TAB
-# -------------------------
-
-with tab_data:
-
-    st.subheader("Dataset Overview")
-
-    col_movies, col_users, col_ratings = st.columns(3)
-
-    col_movies.metric(
-        "Movies",
-        f"{movies['movieId'].nunique():,}",
-    )
-
-    col_users.metric(
-        "Users",
-        f"{df['userId'].nunique():,}",
-    )
-
-    col_ratings.metric(
-        "Ratings",
-        f"{len(df):,}",
-    )
-
-    st.dataframe(
-        movies.sort_values("title").head(100),
-        hide_index=True,
-        use_container_width=True,
-    )

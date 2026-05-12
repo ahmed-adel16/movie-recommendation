@@ -10,15 +10,61 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Load data
 # =========================
 
-DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed_movies.csv"
-df = pd.read_csv(DATA_PATH)
+BASE_PATH = Path(__file__).resolve().parents[1] / "data"
+
+movies_path = BASE_PATH / "processed_movies.csv"
+tags_path = BASE_PATH / "tags.csv"
+
+df = pd.read_csv(movies_path)
+tags_df = pd.read_csv(tags_path)
+
+
+# =========================
+# Clean tags
+# =========================
+
+tags_df = tags_df.dropna(subset=["tag"])
+tags_df["tag"] = tags_df["tag"].astype(str).str.lower().str.replace(" ", "_")
+
+# Optional: reduce noise (recommended)
+tag_counts = tags_df["tag"].value_counts()
+valid_tags = tag_counts[tag_counts >= 5].index
+tags_df = tags_df[tags_df["tag"].isin(valid_tags)]
+
+
+# =========================
+# Aggregate tags per movie
+# =========================
+
+movie_tags = (
+    tags_df.groupby("movieId")["tag"]
+    .apply(lambda x: " ".join(x))
+    .reset_index()
+)
 
 
 # =========================
 # Movies table
 # =========================
 
-movies = df[['movieId', 'title', 'combined_features']].drop_duplicates().reset_index(drop=True)
+movies = df[['movieId', 'title', 'genres']].drop_duplicates().reset_index(drop=True)
+
+# Merge tags
+movies = movies.merge(movie_tags, on="movieId", how="left")
+
+# Fill missing tags
+movies["tag"] = movies["tag"].fillna("")
+
+
+# =========================
+# Combined features (IMPORTANT)
+# =========================
+
+movies["combined_features"] = (
+    movies["genres"].fillna("").str.replace("|", " ") +
+    " " +
+    movies["tag"]
+)
 
 
 # =========================
@@ -26,7 +72,7 @@ movies = df[['movieId', 'title', 'combined_features']].drop_duplicates().reset_i
 # =========================
 
 tfidf = TfidfVectorizer(stop_words='english')
-tfidf_matrix = tfidf.fit_transform(movies['combined_features'])
+tfidf_matrix = tfidf.fit_transform(movies["combined_features"])
 
 similarity_matrix = cosine_similarity(tfidf_matrix)
 
@@ -39,12 +85,13 @@ movie_index = pd.Series(movies.index, index=movies["movieId"])
 
 
 # =========================
-# USER-AWARE CONTENT SCORING
+# CONTENT SCORING
 # =========================
 
 def get_content_scores(user_id, ratings_df=None):
     """
-    Returns: dict(movieId → score)
+    Returns:
+        dict(movieId -> score)
     """
 
     if ratings_df is None:
@@ -55,7 +102,7 @@ def get_content_scores(user_id, ratings_df=None):
     if user_data.empty:
         return {}
 
-    # take positively rated movies only
+    # Focus on liked movies
     liked = user_data[user_data.rating >= 4.0]
 
     if liked.empty:
@@ -91,9 +138,9 @@ if __name__ == "__main__":
 
     scores = get_content_scores(sample_user)
 
-    print("\nTop Content Scores Sample:\n")
-
     top = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    print("\nTop Recommendations:\n")
 
     for movie_id, score in top:
         title = movies[movies.movieId == movie_id].title.values[0]
